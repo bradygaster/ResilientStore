@@ -1,3 +1,5 @@
+using Polly.Extensions.Http;
+using Polly;
 using Refit;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,9 +12,13 @@ var inventoryUrl = string.IsNullOrEmpty(builder.Configuration.GetValue<string>("
     ? "http://inventory"
     : builder.Configuration.GetValue<string>("InventoryApi");
 
-builder.Services.AddHttpClient("Products", (httpClient) => httpClient.BaseAddress = new Uri(productsUrl));
+builder.Services.AddHttpClient("Products", (httpClient) => httpClient.BaseAddress = new Uri(productsUrl))
+                .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                .AddPolicyHandler(GetRetryPolicy());
 
-builder.Services.AddHttpClient("Inventory", (httpClient) => httpClient.BaseAddress = new Uri(inventoryUrl));
+builder.Services.AddHttpClient("Inventory", (httpClient) => httpClient.BaseAddress = new Uri(inventoryUrl))
+                .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                .AddPolicyHandler(GetRetryPolicy());
 
 builder.Services.AddScoped<IStoreBackendClient, StoreBackendClient>();
 builder.Services.AddApplicationMonitoring();
@@ -33,6 +39,15 @@ app.UseRouting();
 app.UseAuthorization();
 app.MapRazorPages();
 app.Run();
+
+static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
+{
+    return HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .OrResult(msg => msg.StatusCode == System.Net.HttpStatusCode.NotFound)
+        .WaitAndRetryAsync(6, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2,
+                                                                    retryAttempt)));
+}
 
 public class Product
 {
